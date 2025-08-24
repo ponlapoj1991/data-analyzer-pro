@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { SocialPost, FilterState, ColumnSchema } from '@/lib/supabase'
+import { SocialPost, FilterState, ColumnSchema, getSocialPosts } from '@/lib/supabase'
 
 interface DataStore {
   // Data
@@ -32,6 +32,9 @@ interface DataStore {
   setSelectedSentiments: (sentiments: string[]) => void
   setLoading: (loading: boolean) => void
   setCurrentDataset: (id: string | null) => void
+  
+  // New action to load data from Supabase
+  loadPostsFromSupabase: () => Promise<void>
   
   // Computed
   getFilteredPosts: () => SocialPost[]
@@ -74,6 +77,40 @@ export const useDataStore = create<DataStore>()(
       setLoading: (isLoading) => set({ isLoading }),
       setCurrentDataset: (currentDataset) => set({ currentDataset }),
       
+      // New function to load data from Supabase
+      loadPostsFromSupabase: async () => {
+        try {
+          set({ isLoading: true })
+          console.log('Loading posts from Supabase...')
+          const posts = await getSocialPosts()
+          console.log('Loaded posts:', posts)
+          
+          if (posts && posts.length > 0) {
+            set({ posts })
+            
+            // Auto-generate columns based on data
+            const samplePost = posts[0]
+            const generatedColumns: ColumnSchema[] = Object.keys(samplePost).map(key => ({
+              name: key,
+              type: typeof samplePost[key as keyof SocialPost] === 'number' ? 'number' : 'text',
+              originalName: key,
+              visible: true
+            }))
+            set({ columns: generatedColumns })
+            
+            console.log('Data loaded successfully:', posts.length, 'posts')
+          } else {
+            console.log('No posts found in database')
+            set({ posts: [] })
+          }
+        } catch (error) {
+          console.error('Error loading posts from Supabase:', error)
+          set({ posts: [] })
+        } finally {
+          set({ isLoading: false })
+        }
+      },
+      
       // Computed functions
       getFilteredPosts: () => {
         const state = get()
@@ -92,7 +129,7 @@ export const useDataStore = create<DataStore>()(
         // Apply date range filter
         if (state.dateRange.start && state.dateRange.end) {
           filtered = filtered.filter(post => {
-            const postDate = new Date(post.created_at)
+            const postDate = new Date(post.created_at || post.published_at || new Date())
             return postDate >= state.dateRange.start! && postDate <= state.dateRange.end!
           })
         }
@@ -107,9 +144,9 @@ export const useDataStore = create<DataStore>()(
               case 'contains':
                 return value?.toString().toLowerCase().includes(filter.value.toLowerCase())
               case 'greater':
-                return value > filter.value
+                return Number(value) > Number(filter.value)
               case 'less':
-                return value < filter.value
+                return Number(value) < Number(filter.value)
               default:
                 return true
             }
