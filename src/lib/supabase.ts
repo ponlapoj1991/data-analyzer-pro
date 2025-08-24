@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = 'https://dnnwkwlcguvuchyknmrq.supabase.co'
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRubndrd2xjZ3V2dWNoeWtubXJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYwNDMyNDMsImV4cCI6MjA3MTYxOTI0M30.e7J_ID8cdClPifRe76bR9ZWmBAxCMYAB3K_UeVqs_G0'
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRubndrd2xjZ3V2dWNoeWtubXJxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzUwMzQxMDcsImV4cCI6MjA1MDYxMDEwN30.CXGdNAJQ7ZwFEm2KsV5Lf3iDQf0QKhNT89hM4kE9mfY'
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
@@ -15,7 +15,8 @@ export interface SocialPost {
   author: string
   url?: string
   hashtags?: string[]
-  created_at: string
+  created_at?: string
+  published_at?: string
   location?: string
   language?: string
   media_type?: string
@@ -45,77 +46,131 @@ export interface FilterState {
   condition: 'AND' | 'OR'
 }
 
-// Initialize database tables
+// Initialize database tables (removed RPC calls)
 export async function initializeTables() {
-  // Create social_posts table
-  const { error: postsError } = await supabase.rpc('create_posts_table')
-  if (postsError && !postsError.message.includes('already exists')) {
-    console.error('Error creating posts table:', postsError)
-  }
-
-  // Create datasets table
-  const { error: datasetsError } = await supabase.rpc('create_datasets_table')
-  if (datasetsError && !datasetsError.message.includes('already exists')) {
-    console.error('Error creating datasets table:', datasetsError)
-  }
+  console.log('Initialize tables function called (RPC disabled)')
+  // RPC functions removed to avoid 404 errors
+  return Promise.resolve()
 }
 
 // Data operations
 export async function insertSocialPosts(posts: SocialPost[]) {
-  const { data, error } = await supabase
-    .from('social_posts')
-    .insert(posts)
-    .select()
+  console.log('Inserting posts to Supabase:', posts.length)
   
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase
+      .from('social_posts')
+      .insert(posts)
+      .select()
+    
+    if (error) {
+      console.error('Insert error:', error)
+      throw error
+    }
+    
+    console.log('Posts inserted successfully:', data?.length)
+    return data
+  } catch (error) {
+    console.error('Error inserting posts:', error)
+    throw error
+  }
 }
 
 export async function getSocialPosts(filters: FilterState[] = []) {
-  let query = supabase.from('social_posts').select('*')
+  console.log('Getting social posts from Supabase...')
   
-  // Apply filters
-  filters.forEach(filter => {
-    switch (filter.operator) {
-      case 'equals':
-        query = query.eq(filter.column, filter.value)
-        break
-      case 'contains':
-        query = query.ilike(filter.column, `%${filter.value}%`)
-        break
-      case 'greater':
-        query = query.gt(filter.column, filter.value)
-        break
-      case 'less':
-        query = query.lt(filter.column, filter.value)
-        break
-      default:
-        break
+  try {
+    // Simple query first - just get all data
+    let query = supabase
+      .from('social_posts')
+      .select('*')
+      .order('id', { ascending: true })
+    
+    // Apply filters if provided
+    filters.forEach(filter => {
+      switch (filter.operator) {
+        case 'equals':
+          query = query.eq(filter.column, filter.value)
+          break
+        case 'contains':
+          query = query.ilike(filter.column, `%${filter.value}%`)
+          break
+        case 'greater':
+          query = query.gt(filter.column, filter.value)
+          break
+        case 'less':
+          query = query.lt(filter.column, filter.value)
+          break
+        default:
+          break
+      }
+    })
+    
+    const { data, error } = await query
+    
+    if (error) {
+      console.error('Query error:', error)
+      throw error
     }
-  })
-  
-  const { data, error } = await query
-  if (error) throw error
-  return data
+    
+    console.log('Posts retrieved successfully:', data?.length || 0)
+    return data || []
+    
+  } catch (error) {
+    console.error('Error getting posts:', error)
+    throw error
+  }
 }
 
 export async function saveDataset(dataset: Omit<Dataset, 'id' | 'created_at' | 'updated_at'>) {
-  const { data, error } = await supabase
-    .from('datasets')
-    .insert(dataset)
-    .select()
-    .single()
-  
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase
+      .from('datasets')
+      .insert(dataset)
+      .select()
+      .single()
+    
+    if (error) throw error
+    return data
+  } catch (error) {
+    console.error('Error saving dataset:', error)
+    throw error
+  }
 }
 
 export async function getDatasets() {
-  const { data, error } = await supabase
-    .from('datasets')
-    .select('*')
-    .order('created_at', { ascending: false })
-  
-  if (error) throw error
-  return data
+  try {
+    const { data, error } = await supabase
+      .from('datasets')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    return data || []
+  } catch (error) {
+    console.error('Error getting datasets:', error)
+    throw error
+  }
+}
+
+// Test connection function
+export async function testSupabaseConnection() {
+  try {
+    console.log('Testing Supabase connection...')
+    const { data, error } = await supabase
+      .from('social_posts')
+      .select('count')
+      .limit(1)
+    
+    if (error) {
+      console.error('Connection test failed:', error)
+      return false
+    }
+    
+    console.log('Supabase connection successful')
+    return true
+  } catch (error) {
+    console.error('Connection test error:', error)
+    return false
+  }
 }
