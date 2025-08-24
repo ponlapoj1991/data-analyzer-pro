@@ -32,7 +32,7 @@ export default function Index() {
   const metrics = getMetrics();
 
   useEffect(() => {
-    initializeTables().catch(console.error);
+    //initializeTables().catch(console.error);
   }, []);
 
   const renderContent = () => {
