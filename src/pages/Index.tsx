@@ -8,8 +8,7 @@ import { FilterPanel } from '@/components/FilterPanel';
 import { ChartBuilder } from '@/components/ChartBuilder';
 import { AIAssistant } from '@/components/AIAssistant';
 import { useDataStore } from '@/hooks/useDataStore';
-import { Upload, Bot } from 'lucide-react';
-import { initializeTables } from '@/lib/supabase';
+import { Upload, Bot, Loader2 } from 'lucide-react';
 
 // Sample data for demo
 const countriesData = [
@@ -28,12 +27,20 @@ const languagesData = [
 
 export default function Index() {
   const [activeView, setActiveView] = useState('dashboard');
-  const { getMetrics, posts } = useDataStore();
+  const { getMetrics, posts, isLoading, loadPostsFromSupabase } = useDataStore();
   const metrics = getMetrics();
 
+  // Auto-load data from Supabase on component mount
   useEffect(() => {
-    //initializeTables().catch(console.error);
-  }, []);
+    console.log('Index component mounted, loading data...');
+    loadPostsFromSupabase();
+  }, [loadPostsFromSupabase]);
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Posts updated:', posts.length);
+    console.log('Current metrics:', metrics);
+  }, [posts, metrics]);
 
   const renderContent = () => {
     switch(activeView) {
@@ -48,6 +55,14 @@ export default function Index() {
       default:
         return (
           <div className="space-y-6">
+            {/* Loading State */}
+            {isLoading && (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin mr-2" />
+                <span>Loading data from database...</span>
+              </div>
+            )}
+
             {/* Metrics Row */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <MetricCard
@@ -80,7 +95,8 @@ export default function Index() {
               />
             </div>
 
-            {posts.length > 0 && <TimeSeriesChart />}
+            {/* Time Series Chart - only show if we have data */}
+            {posts.length > 0 && !isLoading && <TimeSeriesChart />}
 
             {/* Charts */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -89,9 +105,9 @@ export default function Index() {
                 data={Object.entries(metrics.sentimentBreakdown).map(([name, value], index) => ({
                   name: name.charAt(0).toUpperCase() + name.slice(1),
                   value: value as number,
-                  color: name === 'positive' ? 'hsl(var(--success))' : 
-                         name === 'negative' ? 'hsl(var(--destructive))' : 
-                         'hsl(var(--muted-foreground))'
+                  color: name === 'positive' ? 'hsl(142 76% 36%)' : 
+                         name === 'negative' ? 'hsl(0 84% 60%)' : 
+                         'hsl(215 16% 47%)'
                 }))} 
               />
               <PieChart title="Share of Countries" data={countriesData} />
@@ -113,7 +129,7 @@ export default function Index() {
                 <div className="grid grid-cols-2 gap-3">
                   <button 
                     onClick={() => setActiveView('data-import')}
-                    className="p-4 border rounded-lg hover:bg-accent text-left"
+                    className="p-4 border rounded-lg hover:bg-accent text-left transition-colors"
                   >
                     <Upload className="h-6 w-6 mb-2 text-primary" />
                     <div className="font-medium">Import Data</div>
@@ -121,7 +137,7 @@ export default function Index() {
                   </button>
                   <button 
                     onClick={() => setActiveView('ai-assistant')}
-                    className="p-4 border rounded-lg hover:bg-accent text-left"
+                    className="p-4 border rounded-lg hover:bg-accent text-left transition-colors"
                   >
                     <Bot className="h-6 w-6 mb-2 text-primary" />
                     <div className="font-medium">AI Assistant</div>
@@ -143,13 +159,43 @@ export default function Index() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Status</span>
-                    <span className="font-medium text-success">
-                      {posts.length > 0 ? 'Ready' : 'No Data'}
+                    <span className={`font-medium ${posts.length > 0 ? 'text-green-600' : 'text-orange-600'}`}>
+                      {isLoading ? 'Loading...' : posts.length > 0 ? 'Ready' : 'No Data'}
                     </span>
                   </div>
+                  {posts.length === 0 && !isLoading && (
+                    <div className="text-sm text-muted-foreground mt-2 p-3 bg-muted rounded-lg">
+                      <p className="mb-2">📝 No data found in database.</p>
+                      <button 
+                        onClick={loadPostsFromSupabase}
+                        className="text-primary hover:underline"
+                      >
+                        Try reloading data
+                      </button>
+                      <span> or </span>
+                      <button 
+                        onClick={() => setActiveView('data-import')}
+                        className="text-primary hover:underline"
+                      >
+                        import new data
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
+
+            {/* Debug Info - Remove this in production */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="bg-slate-100 p-4 rounded-lg text-sm">
+                <h4 className="font-bold mb-2">Debug Info:</h4>
+                <p>Posts in store: {posts.length}</p>
+                <p>Loading: {isLoading ? 'Yes' : 'No'}</p>
+                <p>Metrics total: {metrics.total}</p>
+                <p>Platform breakdown: {JSON.stringify(metrics.platformBreakdown)}</p>
+                <p>Sentiment breakdown: {JSON.stringify(metrics.sentimentBreakdown)}</p>
+              </div>
+            )}
           </div>
         );
     }
