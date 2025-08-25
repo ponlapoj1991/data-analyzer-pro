@@ -11,8 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Upload, FileText, Globe, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { useDataStore } from '@/hooks/useDataStore'
-import { insertSocialPosts, SocialPost } from '@/lib/supabase'
+import { useDataStore, SocialPost, ColumnSchema } from '@/hooks/useDataStore'
 import { useToast } from '@/hooks/use-toast'
 
 interface ParsedData {
@@ -26,7 +25,7 @@ export const DataUpload = () => {
   const [parsedData, setParsedData] = useState<ParsedData | null>(null)
   const [googleSheetUrl, setGoogleSheetUrl] = useState('')
   const [isProcessing, setIsProcessing] = useState(false)
-  const { setPosts, setColumns, setLoading } = useDataStore()
+  const { addPosts, setColumns, setLoading } = useDataStore()
   const { toast } = useToast()
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -45,6 +44,7 @@ export const DataUpload = () => {
           Papa.parse(result as string, {
             header: true,
             skipEmptyLines: true,
+            dynamicTyping: true,
             complete: (results) => {
               data = results.data as any[]
               processData(data)
@@ -93,19 +93,29 @@ export const DataUpload = () => {
       return
     }
 
-    const columns = Object.keys(data[0])
-    const preview = data.slice(0, 5)
+    // Clean column names - remove whitespace and normalize
+    const cleanedData = data.map(row => {
+      const cleanedRow: any = {}
+      Object.keys(row).forEach(key => {
+        const cleanKey = key.trim()
+        cleanedRow[cleanKey] = row[key]
+      })
+      return cleanedRow
+    })
+
+    const columns = Object.keys(cleanedData[0])
+    const preview = cleanedData.slice(0, 5)
     const issues: string[] = []
 
     // Check for missing data
-    const missingData = data.some(row => 
+    const missingData = cleanedData.some(row => 
       Object.values(row).some(val => val === null || val === undefined || val === '')
     )
     if (missingData) issues.push('Contains missing values')
 
     // Check for duplicates
     const seen = new Set()
-    const hasDuplicates = data.some(row => {
+    const hasDuplicates = cleanedData.some(row => {
       const key = JSON.stringify(row)
       if (seen.has(key)) return true
       seen.add(key)
@@ -113,7 +123,7 @@ export const DataUpload = () => {
     })
     if (hasDuplicates) issues.push('Contains duplicate rows')
 
-    setParsedData({ data, columns, preview, issues })
+    setParsedData({ data: cleanedData, columns, preview, issues })
     setIsProcessing(false)
   }
 
@@ -133,13 +143,14 @@ export const DataUpload = () => {
 
       const response = await fetch(csvUrl)
       if (!response.ok) {
-        throw new Error('Failed to fetch Google Sheet data')
+        throw new Error('Failed to fetch Google Sheet data. Make sure the sheet is publicly accessible.')
       }
 
       const csvText = await response.text()
       Papa.parse(csvText, {
         header: true,
         skipEmptyLines: true,
+        dynamicTyping: true,
         complete: (results) => {
           processData(results.data as any[])
         },
@@ -162,43 +173,66 @@ export const DataUpload = () => {
 
     setLoading(true)
     try {
-      // Map data to SocialPost format
-      const posts: SocialPost[] = parsedData.data.map((row, index) => ({
-        content: row.content || row.text || row.message || `Post ${index + 1}`,
-        platform: row.platform || row.source || 'Unknown',
-        sentiment: ['positive', 'negative', 'neutral'].includes(row.sentiment) 
-          ? row.sentiment 
-          : 'neutral',
-        engagement: parseInt(row.engagement || row.likes || row.interactions || '0'),
-        author: row.author || row.user || row.username || 'Anonymous',
-        url: row.url || row.link,
-        hashtags: row.hashtags ? row.hashtags.split(',').map((h: string) => h.trim()) : [],
-        created_at: row.created_at || row.date || new Date().toISOString(),
-        location: row.location || row.country,
-        language: row.language || 'en',
-        media_type: row.media_type || 'text',
-        reach: parseInt(row.reach || row.impressions || '0')
-      }))
-
-      // Save to Supabase
-      await insertSocialPosts(posts)
+      console.log('Processing import data:', parsedData.data.length, 'rows')
       
-      // Update store
-      setPosts(posts)
-      setColumns(parsedData.columns.map(col => ({
+      // Map data to SocialPost format with flexible column mapping
+      const posts: SocialPost[] = parsedData.data.map((row, index) => {
+        // Flexible mapping - try different possible column names
+        const getFieldValue = (possibleNames: string[], defaultValue: any = '') => {
+          for (const name of possibleNames) {
+            if (row[name] !== undefined && row[name] !== null && row[name] !== '') {
+              return row[name]
+            }
+          }
+          return defaultValue
+        }
+
+        return {
+          id: `imported-${Date.now()}-${index}`,
+          content: getFieldValue(['content', 'text', 'message', 'post', 'description'], `Post ${index + 1}`),
+          platform: getFieldValue(['platform', 'source', 'channel', 'media'], 'Unknown'),
+          sentiment: ['positive', 'negative', 'neutral'].includes(getFieldValue(['sentiment', 'tone', 'emotion']))
+            ? getFieldValue(['sentiment', 'tone', 'emotion'])
+            : 'neutral',
+          engagement: parseInt(getFieldValue(['engagement', 'likes', 'interactions', 'reactions', 'total_engagement'], '0')) || 0,
+          author: getFieldValue(['author', 'user', 'username', 'user_name', 'creator'], 'Anonymous'),
+          url: getFieldValue(['url', 'link', 'permalink', 'post_url']),
+          hashtags: getFieldValue(['hashtags', 'tags']) ? 
+            String(getFieldValue(['hashtags', 'tags'])).split(',').map((h: string) => h.trim()) : [],
+          created_at: getFieldValue(['created_at', 'date', 'timestamp', 'post_date', 'published_date']) || new Date().toISOString(),
+          published_at: getFieldValue(['published_at', 'publish_date', 'date', 'created_at']) || new Date().toISOString(),
+          location: getFieldValue(['location', 'country', 'region', 'place']),
+          language: getFieldValue(['language', 'lang', 'locale'], 'en'),
+          media_type: getFieldValue(['media_type', 'type', 'content_type'], 'text'),
+          reach: parseInt(getFieldValue(['reach', 'impressions', 'views', 'audience'], '0')) || 0
+        }
+      })
+
+      console.log('Mapped posts:', posts.length)
+      console.log('Sample post:', posts[0])
+
+      // Add posts to store (this will save to localStorage)
+      addPosts(posts)
+      
+      // Generate columns based on the actual data
+      const generatedColumns: ColumnSchema[] = parsedData.columns.map(col => ({
         name: col,
-        type: 'text',
+        type: typeof parsedData.data[0][col] === 'number' ? 'number' : 'text',
         originalName: col,
         visible: true
-      })))
+      }))
+      setColumns(generatedColumns)
 
       toast({
         title: "Data Imported Successfully",
-        description: `Imported ${posts.length} social media posts`,
+        description: `Imported ${posts.length} social media posts to local storage`,
       })
 
       setParsedData(null)
+      console.log('Import completed successfully')
+      
     } catch (error) {
+      console.error('Import error:', error)
       toast({
         title: "Import Error",
         description: error instanceof Error ? error.message : "Failed to import data",
@@ -224,10 +258,10 @@ export const DataUpload = () => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Upload className="h-5 w-5" />
-          Data Import
+          Data Import (Local Storage)
         </CardTitle>
         <CardDescription>
-          Upload CSV/Excel files or connect to Google Sheets to import social media data
+          Upload CSV/Excel files or connect to Google Sheets. Data will be stored locally in your browser.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -273,7 +307,7 @@ export const DataUpload = () => {
                 onChange={(e) => setGoogleSheetUrl(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Make sure the sheet is publicly accessible or share with view permissions
+                Make sure the sheet is publicly accessible or has link sharing enabled
               </p>
             </div>
             <Button 
@@ -324,6 +358,21 @@ export const DataUpload = () => {
                   )}
                   {parsedData.issues.length > 0 ? 'Issues Found' : 'Clean Data'}
                 </Badge>
+              </div>
+
+              {/* Available Columns Info */}
+              <div className="mb-4 p-3 bg-muted rounded-lg">
+                <h4 className="font-medium mb-2">Available Columns:</h4>
+                <div className="flex flex-wrap gap-1">
+                  {parsedData.columns.map((col) => (
+                    <Badge key={col} variant="secondary" className="text-xs">
+                      {col}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Data will be automatically mapped to social media post fields
+                </p>
               </div>
 
               {/* Data Preview Table */}
