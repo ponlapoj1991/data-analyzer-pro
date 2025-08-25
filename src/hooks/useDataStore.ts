@@ -1,6 +1,38 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { SocialPost, FilterState, ColumnSchema, getSocialPosts } from '@/lib/supabase'
+
+// Remove Supabase imports - use local types
+export interface SocialPost {
+  id?: string
+  content: string
+  platform: string
+  sentiment: 'positive' | 'negative' | 'neutral'
+  engagement: number
+  author: string
+  url?: string
+  hashtags?: string[]
+  created_at?: string
+  published_at?: string
+  location?: string
+  language?: string
+  media_type?: string
+  reach?: number
+}
+
+export interface ColumnSchema {
+  name: string
+  type: 'text' | 'number' | 'date' | 'url' | 'sentiment' | 'array'
+  originalName: string
+  visible: boolean
+  format?: string
+}
+
+export interface FilterState {
+  column: string
+  operator: 'equals' | 'contains' | 'greater' | 'less' | 'between' | 'in'
+  value: any
+  condition: 'AND' | 'OR'
+}
 
 interface DataStore {
   // Data
@@ -23,6 +55,7 @@ interface DataStore {
   // Actions
   setPosts: (posts: SocialPost[]) => void
   addPost: (post: SocialPost) => void
+  addPosts: (posts: SocialPost[]) => void
   setColumns: (columns: ColumnSchema[]) => void
   addFilter: (filter: FilterState) => void
   removeFilter: (index: number) => void
@@ -33,8 +66,10 @@ interface DataStore {
   setLoading: (loading: boolean) => void
   setCurrentDataset: (id: string | null) => void
   
-  // New action to load data from Supabase
-  loadPostsFromSupabase: () => Promise<void>
+  // Local storage functions
+  loadPostsFromStorage: () => void
+  savePostsToStorage: (posts: SocialPost[]) => void
+  clearAllData: () => void
   
   // Computed
   getFilteredPosts: () => SocialPost[]
@@ -47,6 +82,8 @@ interface DataStore {
     platformBreakdown: Record<string, number>
   }
 }
+
+const STORAGE_KEY = 'real-studio-posts'
 
 export const useDataStore = create<DataStore>()(
   persist(
@@ -63,8 +100,29 @@ export const useDataStore = create<DataStore>()(
       selectedSentiments: [],
       
       // Actions
-      setPosts: (posts) => set({ posts }),
-      addPost: (post) => set((state) => ({ posts: [...state.posts, post] })),
+      setPosts: (posts) => {
+        set({ posts })
+        get().savePostsToStorage(posts)
+      },
+      
+      addPost: (post) => {
+        const newPost = { ...post, id: Date.now().toString() }
+        const newPosts = [...get().posts, newPost]
+        set({ posts: newPosts })
+        get().savePostsToStorage(newPosts)
+      },
+      
+      addPosts: (posts) => {
+        const existingPosts = get().posts
+        const newPosts = posts.map((post, index) => ({
+          ...post,
+          id: post.id || `${Date.now()}-${index}`
+        }))
+        const allPosts = [...existingPosts, ...newPosts]
+        set({ posts: allPosts })
+        get().savePostsToStorage(allPosts)
+      },
+      
       setColumns: (columns) => set({ columns }),
       addFilter: (filter) => set((state) => ({ filters: [...state.filters, filter] })),
       removeFilter: (index) => set((state) => ({
@@ -77,38 +135,53 @@ export const useDataStore = create<DataStore>()(
       setLoading: (isLoading) => set({ isLoading }),
       setCurrentDataset: (currentDataset) => set({ currentDataset }),
       
-      // New function to load data from Supabase
-      loadPostsFromSupabase: async () => {
+      // Local storage functions
+      loadPostsFromStorage: () => {
         try {
-          set({ isLoading: true })
-          console.log('Loading posts from Supabase...')
-          const posts = await getSocialPosts()
-          console.log('Loaded posts:', posts)
-          
-          if (posts && posts.length > 0) {
+          const stored = localStorage.getItem(STORAGE_KEY)
+          if (stored) {
+            const posts = JSON.parse(stored)
+            console.log('Loaded posts from localStorage:', posts.length)
             set({ posts })
             
-            // Auto-generate columns based on data
-            const samplePost = posts[0]
-            const generatedColumns: ColumnSchema[] = Object.keys(samplePost).map(key => ({
-              name: key,
-              type: typeof samplePost[key as keyof SocialPost] === 'number' ? 'number' : 'text',
-              originalName: key,
-              visible: true
-            }))
-            set({ columns: generatedColumns })
-            
-            console.log('Data loaded successfully:', posts.length, 'posts')
+            // Auto-generate columns if we have data
+            if (posts.length > 0) {
+              const samplePost = posts[0]
+              const generatedColumns: ColumnSchema[] = Object.keys(samplePost).map(key => ({
+                name: key,
+                type: typeof samplePost[key] === 'number' ? 'number' : 'text',
+                originalName: key,
+                visible: true
+              }))
+              set({ columns: generatedColumns })
+            }
           } else {
-            console.log('No posts found in database')
-            set({ posts: [] })
+            console.log('No posts found in localStorage')
           }
         } catch (error) {
-          console.error('Error loading posts from Supabase:', error)
-          set({ posts: [] })
-        } finally {
-          set({ isLoading: false })
+          console.error('Error loading from localStorage:', error)
         }
+      },
+      
+      savePostsToStorage: (posts) => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(posts))
+          console.log('Saved posts to localStorage:', posts.length)
+        } catch (error) {
+          console.error('Error saving to localStorage:', error)
+        }
+      },
+      
+      clearAllData: () => {
+        localStorage.removeItem(STORAGE_KEY)
+        set({ 
+          posts: [], 
+          columns: [], 
+          filters: [], 
+          selectedPlatforms: [], 
+          selectedSentiments: [] 
+        })
+        console.log('Cleared all data')
       },
       
       // Computed functions
@@ -188,7 +261,8 @@ export const useDataStore = create<DataStore>()(
         currentDataset: state.currentDataset,
         selectedPlatforms: state.selectedPlatforms,
         selectedSentiments: state.selectedSentiments,
-        dateRange: state.dateRange
+        dateRange: state.dateRange,
+        filters: state.filters
       })
     }
   )
