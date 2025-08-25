@@ -8,7 +8,8 @@ import { FilterPanel } from '@/components/FilterPanel';
 import { ChartBuilder } from '@/components/ChartBuilder';
 import { AIAssistant } from '@/components/AIAssistant';
 import { useDataStore } from '@/hooks/useDataStore';
-import { Upload, Bot, Loader2 } from 'lucide-react';
+import { Upload, Bot, Loader2, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 // Sample data for demo
 const countriesData = [
@@ -27,20 +28,35 @@ const languagesData = [
 
 export default function Index() {
   const [activeView, setActiveView] = useState('dashboard');
-  const { getMetrics, posts, isLoading, loadPostsFromSupabase } = useDataStore();
+  const { 
+    getMetrics, 
+    posts, 
+    isLoading, 
+    loadPostsFromStorage, 
+    clearAllData,
+    setLoading 
+  } = useDataStore();
   const metrics = getMetrics();
 
-  // Auto-load data from Supabase on component mount
+  // Auto-load data from localStorage on component mount
   useEffect(() => {
-    console.log('Index component mounted, loading data...');
-    loadPostsFromSupabase();
-  }, [loadPostsFromSupabase]);
+    console.log('Index component mounted, loading data from localStorage...');
+    setLoading(true);
+    loadPostsFromStorage();
+    setLoading(false);
+  }, [loadPostsFromStorage, setLoading]);
 
   // Debug logging
   useEffect(() => {
     console.log('Posts updated:', posts.length);
     console.log('Current metrics:', metrics);
   }, [posts, metrics]);
+
+  const handleClearData = () => {
+    if (window.confirm('Are you sure you want to clear all data? This cannot be undone.')) {
+      clearAllData();
+    }
+  };
 
   const renderContent = () => {
     switch(activeView) {
@@ -59,7 +75,7 @@ export default function Index() {
             {isLoading && (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-8 w-8 animate-spin mr-2" />
-                <span>Loading data from database...</span>
+                <span>Loading data...</span>
               </div>
             )}
 
@@ -163,11 +179,24 @@ export default function Index() {
                       {isLoading ? 'Loading...' : posts.length > 0 ? 'Ready' : 'No Data'}
                     </span>
                   </div>
+                  {posts.length > 0 && (
+                    <div className="pt-3 border-t">
+                      <Button 
+                        onClick={handleClearData}
+                        variant="destructive"
+                        size="sm"
+                        className="w-full"
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Clear All Data
+                      </Button>
+                    </div>
+                  )}
                   {posts.length === 0 && !isLoading && (
                     <div className="text-sm text-muted-foreground mt-2 p-3 bg-muted rounded-lg">
-                      <p className="mb-2">📝 No data found in database.</p>
+                      <p className="mb-2">No data found in local storage.</p>
                       <button 
-                        onClick={loadPostsFromSupabase}
+                        onClick={loadPostsFromStorage}
                         className="text-primary hover:underline"
                       >
                         Try reloading data
@@ -188,7 +217,7 @@ export default function Index() {
             {/* Debug Info - Remove this in production */}
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-slate-100 p-4 rounded-lg text-sm">
-                <h4 className="font-bold mb-2">Debug Info:</h4>
+                <h4 className="font-bold mb-2">Debug Info (localStorage):</h4>
                 <p>Posts in store: {posts.length}</p>
                 <p>Loading: {isLoading ? 'Yes' : 'No'}</p>
                 <p>Metrics total: {metrics.total}</p>
